@@ -1518,6 +1518,35 @@ class Page(Document):
             self._panel_icon_map_cache: dict[str, str] | None = None
             self._plantuml_index: int = 0
             self._storage_plantuml_macros_cache: list[Tag] | None = None
+            self._heading_slugs: dict[str, str] = {}
+
+        def convert_soup(self, soup: BeautifulSoup) -> str:
+            previous_slugs = self._heading_slugs
+            self._heading_slugs = previous_slugs.copy()
+            used_slugs: set[str] = set()
+            for heading in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
+                base_slug = github_heading_slug(heading.get_text())
+                slug = base_slug
+                suffix = 0
+                while slug in used_slugs:
+                    suffix += 1
+                    slug = f"{base_slug}-{suffix}"
+                used_slugs.add(slug)
+                # Confluence IDs contain the page title and omit heading spaces.
+                targets = [
+                    heading,
+                    *heading.find_all(id=True),
+                    *heading.find_all("a", attrs={"name": True}),
+                ]
+                for target in targets:
+                    for attr in ("id", "name"):
+                        if anchor := target.get(attr):
+                            self._heading_slugs[str(anchor)] = slug
+            try:
+                return super().convert_soup(soup)
+            finally:
+                # Property tables can recursively convert fragments of this page.
+                self._heading_slugs = previous_slugs
 
         @property
         def _colorid_map(self) -> dict[str, str]:
@@ -2114,7 +2143,11 @@ class Page(Document):
             if (href := href_str).startswith("#"):
                 if settings.export.page_href == "wiki":
                     return f"[[#{text}]]"
-                return f"[{text}](#{github_heading_slug(href[1:])})"
+                anchor = urllib.parse.unquote(href[1:])
+                slug = self._heading_slugs.get(anchor)
+                if slug is None:
+                    slug = github_heading_slug(anchor)
+                return f"[{text}](#{slug})"
 
             return super().convert_a(el, text, parent_tags)
 

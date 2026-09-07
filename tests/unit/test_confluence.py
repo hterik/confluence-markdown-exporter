@@ -94,7 +94,79 @@ class TestSquareBracketEscaping:
 
 
 class TestAnchorLinkConversion:
-    """Internal anchor links must use the href value for slug, not link text."""
+    """Internal anchors resolve heading IDs without relying on link labels."""
+
+    @pytest.mark.parametrize("label", ["HT remote agents", "Jump to the agents"])
+    def test_confluence_heading_id(self, converter: Page.Converter, label: str) -> None:
+        html = (
+            f'<a href="#NewAgentinstallation-HTremoteagents">{label}</a>'
+            '<h2 id="NewAgentinstallation-HTremoteagents">HT remote agents</h2>'
+        )
+        result = converter.convert(html)
+        assert f"[{label}](#ht-remote-agents)" in result
+        assert "## HT remote agents" in result
+
+    def test_formatted_heading_and_encoded_id(self, converter: Page.Converter) -> None:
+        html = (
+            '<a href="#Page-Setup%28agents%29">Jump here</a>'
+            '<h2 id="Page-Setup(agents)">Setup <strong>remote</strong> agents</h2>'
+        )
+        assert "[Jump here](#setup-remote-agents)" in converter.convert(html)
+
+    @pytest.mark.parametrize("attribute", ["id", "name"])
+    def test_heading_child_anchor(self, converter: Page.Converter, attribute: str) -> None:
+        html = (
+            '<a href="#Page-HTremoteagents">Jump here</a>'
+            f'<h2><a {attribute}="Page-HTremoteagents"></a>HT remote agents</h2>'
+        )
+        assert "[Jump here](#ht-remote-agents)" in converter.convert(html)
+
+    def test_duplicate_headings(self, converter: Page.Converter) -> None:
+        html = (
+            '<a href="#Page-Agents">First</a>'
+            '<a href="#Page-Agents.1">Second</a>'
+            '<a href="#Page-Agents.2">Third</a>'
+            "<h1>Agents</h1>"
+            '<h2 id="Page-Agents">Agents</h2>'
+            '<h2 id="Page-Agents.1">Agents</h2>'
+            '<h2 id="Page-Agents.2">Agents</h2>'
+        )
+        result = converter.convert(html)
+        assert "[First](#agents-1)" in result
+        assert "[Second](#agents-2)" in result
+        assert "[Third](#agents-3)" in result
+
+    def test_heading_map_does_not_leak(self, converter: Page.Converter) -> None:
+        converter.convert('<h2 id="Page-Heading">Old heading</h2>')
+        result = converter.convert('<a href="#Page-Heading">Jump here</a>')
+        assert result.strip() == "[Jump here](#page-heading)"
+
+    def test_duplicate_slug_collision(self, converter: Page.Converter) -> None:
+        html = (
+            '<a href="#Page-Agents.1">Jump here</a>'
+            "<h2>Agents</h2><h2>Agents-1</h2>"
+            '<h2 id="Page-Agents.1">Agents</h2>'
+        )
+        assert "[Jump here](#agents-2)" in converter.convert(html)
+
+    def test_exported_toc_resolves_page_heading(self) -> None:
+        page = _make_page(
+            body=(
+                '<div data-macro-name="toc"></div>'
+                '<h2 id="NewAgentinstallation-HTremoteagents">HT remote agents</h2>'
+            ),
+            body_export=(
+                '<div class="toc-macro"><ul><li>'
+                '<a href="#NewAgentinstallation-HTremoteagents">HT remote agents</a>'
+                "</li></ul></div>"
+            ),
+            attachments=[],
+        )
+        with patch("confluence_markdown_exporter.confluence.settings") as mock_settings:
+            mock_settings.export.include_toc = True
+            mock_settings.export.page_href = "relative"
+            result = Page.Converter(page).convert(page.html)
+        assert "[HT remote agents](#ht-remote-agents)" in result
 
     def test_anchor_uses_href_not_link_text(self, converter: Page.Converter) -> None:
         """Anchor slug derived from href, not display text."""
@@ -120,9 +192,12 @@ class TestAnchorLinkConversion:
 
         with patch("confluence_markdown_exporter.confluence.settings") as mock_settings:
             mock_settings.export.page_href = "wiki"
-            html = '<a href="#1.-Request-Service">Request Service</a>'
+            html = (
+                '<a href="#1.-Request-Service">Request Service</a>'
+                '<h2 id="1.-Request-Service">Different heading</h2>'
+            )
             result = converter.convert(html).strip()
-        assert result == "[[#Request Service]]"
+        assert result.startswith("[[#Request Service]]")
 
 
 def _make_attachment(
