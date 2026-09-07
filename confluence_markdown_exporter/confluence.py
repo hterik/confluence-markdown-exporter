@@ -939,6 +939,11 @@ def _parse_image_captions(storage_xml: str) -> dict[str, str]:
             captions[filename_m.group(1)] = caption
     return captions
 
+@functools.cache
+def _cached_get(base_url: str, url: str, params: list(tuple[str, str]) | None):
+    dictparams = dict(params) if params else None
+    client = get_thread_confluence(base_url)
+    return client.get(url, params=dictparams)
 
 def _descendants(page: Page | Descendant | Ancestor) -> list[Descendant]:
     url = "rest/api/content/search"
@@ -948,15 +953,14 @@ def _descendants(page: Page | Descendant | Ancestor) -> list[Descendant]:
         "limit": 250,
     }
     results = []
-    client = get_thread_confluence(page.base_url)
 
     try:
-        response = cast("dict", client.get(url, params=params))
+        response = cast("dict", _cached_get(page.base_url, url, frozenset(params.items())))
         results.extend(response.get("results", []))
         next_path = response.get("_links", {}).get("next")
 
         while next_path:
-            response = cast("dict", client.get(next_path))
+            response = cast("dict", _cached_get(page.base_url, next_path, None))
             results.extend(response.get("results", []))
             next_path = response.get("_links", {}).get("next")
 
