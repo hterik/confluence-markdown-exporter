@@ -730,10 +730,13 @@ class Attachment(Document):
         title = self.title
         title_without_ext = title[: -len(ext)] if ext and title.endswith(ext) else Path(title).stem
 
+        # TODO: This commit is obsolete once https://github.com/Spenhouet/confluence-markdown-exporter/pull/305 get merged
+        page_id = self.ancestors[-1].id if self.ancestors else ""
         ancestors_without_last = [sanitize_filename(a.title) for a in self.ancestors[0:-1]]
 
         return {
             **super()._template_vars,
+            "page_id": page_id,
             "attachment_id": str(self.id),
             "attachment_title": sanitize_filename(title_without_ext),
             # file_id is a GUID and does not need sanitization. On
